@@ -1,11 +1,41 @@
 import os
 import torch
-
-from data import train_dataloader
-from utils import Adder, Timer, check_lr
-from torch.utils.tensorboard import SummaryWriter
-from valid import _valid
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
+from skimage.metrics import peak_signal_noise_ratio
+
+from data import train_dataloader, valid_dataloader
+from utils import Adder, Timer, check_lr
+
+
+def _valid(model, args, ep):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    gopro = valid_dataloader(args.data_dir, batch_size=1, num_workers=0)
+    model.eval()
+    psnr_adder = Adder()
+
+    with torch.no_grad():
+        print('Start GoPro Evaluation')
+        for idx, data in enumerate(gopro):
+            input_img, label_img = data
+            input_img = input_img.to(device)
+            if not os.path.exists(os.path.join(args.result_dir, '%d' % (ep))):
+                os.mkdir(os.path.join(args.result_dir, '%d' % (ep)))
+
+            pred = model(input_img)
+
+            pred_clip = torch.clamp(pred[2], 0, 1)
+            p_numpy = pred_clip.squeeze(0).cpu().numpy()
+            label_numpy = label_img.squeeze(0).cpu().numpy()
+
+            psnr = peak_signal_noise_ratio(p_numpy, label_numpy, data_range=1)
+
+            psnr_adder(psnr)
+            print('\r%03d'%idx, end=' ')
+
+    print('\n')
+    model.train()
+    return psnr_adder.average()
 
 
 def _train(model, args):
@@ -17,6 +47,8 @@ def _train(model, args):
 
     dataloader = train_dataloader(args.data_dir, args.batch_size, args.num_worker)
     max_iter = len(dataloader)
+    print(max_iter)
+    return 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.lr_steps, args.gamma)
     epoch = 1
     if args.resume:

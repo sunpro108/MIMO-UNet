@@ -64,7 +64,8 @@ class IH5Dataset(Dataset):
         img_path = self.list_names[index]
         comp, real, mask = self.transform(comp, real, mask)
         comp  = self._compose(comp, mask, real)
-        return dict(zip(['comp','real','mask','img_path'],(comp, real, mask, img_path)))
+        # return dict(zip(['comp','real','mask','img_path'],(comp, real, mask, img_path)))
+        return  comp, real, mask
 
     def __len__(self):
         return self._len_dataset

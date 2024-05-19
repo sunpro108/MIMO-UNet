@@ -2,9 +2,10 @@ import os
 import torch
 import argparse
 from torch.backends import cudnn
-from models.MIMOUNet import build_net
+
+from models import build_net
 from train import _train
-from eval import _eval
+from evaluate import _eval
 
 
 def main(args):
