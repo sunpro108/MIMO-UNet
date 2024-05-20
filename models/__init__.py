@@ -1,4 +1,5 @@
 from .mimounet import MIMOUNet, MIMOUNetPlus
+from .dwt_unet import HMimoUnet
 
 def build_net(model_name):
     class ModelError(Exception):

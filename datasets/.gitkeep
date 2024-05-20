@@ -1,0 +1,3 @@
+ln data here
+cd datasets
+ln -s your/path/to/iharmony4 ihm4
