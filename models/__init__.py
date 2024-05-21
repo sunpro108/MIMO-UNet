@@ -13,4 +13,6 @@ def build_net(model_name):
         return MIMOUNetPlus()
     elif model_name == "MIMO-UNet":
         return MIMOUNet()
+    elif model_name == "dwt":
+        return HMimoUnet(in_channel=9)
     raise ModelError('Wrong Model!\nYou should choose MIMO-UNetPlus or MIMO-UNet.')

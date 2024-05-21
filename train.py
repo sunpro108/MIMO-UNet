@@ -1,8 +1,14 @@
 import os
 import torch
+from PIL import Image
+
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-from skimage.metrics import peak_signal_noise_ratio
+# from skimage.metrics import peak_signal_noise_ratio
+from torchmetrics.image import PeakSignalNoiseRatio as PSNR
+from pytorch_wavelets import DWTForward, DWTInverse
+from einops import rearrange
 
 from data import train_dataloader, valid_dataloader
 from utils import Adder, Timer, check_lr
@@ -10,27 +16,51 @@ from utils import Adder, Timer, check_lr
 
 def _valid(model, args, ep):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    gopro = valid_dataloader(args.data_dir, batch_size=1, num_workers=0)
+    dataloader = valid_dataloader(
+        subset=args.subset,
+        archive=args.archive,
+        use_subarch=args.use_subarch,
+        batch_size=args.batch_size,
+        num_workers=args.num_worker
+    )
     model.eval()
     psnr_adder = Adder()
+    dwt = DWTForward(J=3, wave='haar', mode='zero').to(device)
+    iwt = DWTInverse(wave='haar', mode='zero').to(device)
+    psnr1 = PSNR(data_range  = (0.0, 255.0), reduction = "elementwise_mean", dim = (1, 2, 3))
+    psnr2 = PSNR(data_range  = (0.0, 255.0), reduction = "elementwise_mean", dim = (1, 2, 3))
+    psnr3 = PSNR(data_range  = (0.0, 255.0), reduction = "elementwise_mean", dim = (1, 2, 3))
 
     with torch.no_grad():
-        print('Start GoPro Evaluation')
-        for idx, data in enumerate(gopro):
-            input_img, label_img = data
+        for idx, data in enumerate(dataloader):
+            input_img, label_img, mask = data
             input_img = input_img.to(device)
-            if not os.path.exists(os.path.join(args.result_dir, '%d' % (ep))):
-                os.mkdir(os.path.join(args.result_dir, '%d' % (ep)))
+            label_img = label_img.to(device)
+            lc, x = dwt(input_img)
+            lr, h = dwt(label_img)
+            # if not os.path.exists(os.path.join(args.result_dir, '%d' % (ep))):
+            #     os.mkdir(os.path.join(args.result_dir, '%d' % (ep)))
 
-            pred = model(input_img)
+            pred = model(x)
+            # ic = iwt((lc, x))
+            ip = iwt((lr, pred))
+            # ip = iwt((lc, pred))
 
-            pred_clip = torch.clamp(pred[2], 0, 1)
-            p_numpy = pred_clip.squeeze(0).cpu().numpy()
-            label_numpy = label_img.squeeze(0).cpu().numpy()
+            label_img = (255 * torch.clip(0.5 * label_img + 0.5, 0, 1)).to(torch.uint8)
 
-            psnr = peak_signal_noise_ratio(p_numpy, label_numpy, data_range=1)
+            ip = 0.5 * ip + 0.5
+            ip = torch.clamp(ip, 0, 1)
+            ip = (255*ip).to(torch.uint8)
+            p1 = psnr1.forward(ip, label_img)
 
-            psnr_adder(psnr)
+            # ir = 0.5 * ir + 0.5
+            # ir = torch.clamp(ir, 0, 1)
+            # ir = (255*ir).to(torch.uint8)
+            # p2 = psnr2.forward(ir, label_img)
+            
+
+            psnr_adder(p1.cpu().numpy())
+            # psnr_adder(p2.cpu().numpy())
             print('\r%03d'%idx, end=' ')
 
     print('\n')
@@ -45,10 +75,15 @@ def _train(model, args):
                                  lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
 
-    dataloader = train_dataloader(args.data_dir, args.batch_size, args.num_worker)
+    dataloader = train_dataloader(
+        subset=args.subset,
+        archive=args.archive,
+        use_subarch=args.use_subarch,
+        batch_size=args.batch_size,
+        num_workers=args.num_worker
+    )
     max_iter = len(dataloader)
     print(max_iter)
-    return 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.lr_steps, args.gamma)
     epoch = 1
     if args.resume:
@@ -69,39 +104,55 @@ def _train(model, args):
     iter_timer = Timer('m')
     best_psnr=-1
 
+    dwt = DWTForward(J=3, wave='haar', mode='zero').to(device)
+    iwt = DWTInverse(wave='haar', mode='zero').to(device)
     for epoch_idx in range(epoch, args.num_epoch + 1):
 
         epoch_timer.tic()
         iter_timer.tic()
         for iter_idx, batch_data in enumerate(dataloader):
 
-            input_img, label_img = batch_data
+            input_img, label_img, mask = batch_data
             input_img = input_img.to(device)
             label_img = label_img.to(device)
+            _, x = dwt(input_img)
+            label_ll, label = dwt(label_img)
 
             optimizer.zero_grad()
-            pred_img = model(input_img)
-            label_img2 = F.interpolate(label_img, scale_factor=0.5, mode='bilinear')
-            label_img4 = F.interpolate(label_img, scale_factor=0.25, mode='bilinear')
-            l1 = criterion(pred_img[0], label_img4)
-            l2 = criterion(pred_img[1], label_img2)
-            l3 = criterion(pred_img[2], label_img)
+            pred = model(x)
+            l1 = criterion(pred[0], label[0])
+            l2 = criterion(pred[1], label[1])
+            l3 = criterion(pred[2], label[2])
             loss_content = l1+l2+l3
 
-            label_fft1 = torch.rfft(label_img4, signal_ndim=2, normalized=False, onesided=False)
-            pred_fft1 = torch.rfft(pred_img[0], signal_ndim=2, normalized=False, onesided=False)
-            label_fft2 = torch.rfft(label_img2, signal_ndim=2, normalized=False, onesided=False)
-            pred_fft2 = torch.rfft(pred_img[1], signal_ndim=2, normalized=False, onesided=False)
-            label_fft3 = torch.rfft(label_img, signal_ndim=2, normalized=False, onesided=False)
-            pred_fft3 = torch.rfft(pred_img[2], signal_ndim=2, normalized=False, onesided=False)
+            img_pred = iwt((label_ll, pred))
+            loss_fft = criterion(img_pred, label_img)
 
-            f1 = criterion(pred_fft1, label_fft1)
-            f2 = criterion(pred_fft2, label_fft2)
-            f3 = criterion(pred_fft3, label_fft3)
-            loss_fft = f1+f2+f3
+            if iter_idx % 100 == 0:
+                img_pred_show = (255 * torch.clamp(0.5 * img_pred.detach().clone() + 0.5, 0, 1)).to(torch.uint8)
+                img_pred_show = rearrange(img_pred_show, 'b c h w -> (b h) w c')
+                Image.fromarray(
+                    img_pred_show.cpu().numpy()
+                ).save(f'results/{args.model_path}/result_image/img_{iter_idx}.png')
 
-            loss = loss_content + 0.1 * loss_fft
+            # img_label_show = (255 * torch.clamp(0.5 * label_img + 0.5, 0, 1)).to(torch.uint8)
+            # label_fft1 = torch.rfft(label_img4, signal_ndim=2, normalized=False, onesided=False)
+            # pred_fft1 = torch.rfft(pred_img[0], signal_ndim=2, normalized=False, onesided=False)
+            # label_fft2 = torch.rfft(label_img2, signal_ndim=2, normalized=False, onesided=False)
+            # pred_fft2 = torch.rfft(pred_img[1], signal_ndim=2, normalized=False, onesided=False)
+            # label_fft3 = torch.rfft(label_img, signal_ndim=2, normalized=False, onesided=False)
+            # pred_fft3 = torch.rfft(pred_img[2], signal_ndim=2, normalized=False, onesided=False)
+
+            # f1 = criterion(pred_fft1, label_fft1)
+            # f2 = criterion(pred_fft2, label_fft2)
+            # f3 = criterion(pred_fft3, label_fft3)
+            # loss_fft = f1+f2+f3
+
+            loss = loss_content + 1.0 * loss_fft
+            loss = loss_content 
             loss.backward()
+            # nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
+            torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=0.5)
             optimizer.step()
 
             iter_pixel_adder(loss_content.item())

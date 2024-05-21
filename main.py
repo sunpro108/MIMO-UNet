@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import argparse
 from torch.backends import cudnn
@@ -14,17 +15,17 @@ def main(args):
 
     if not os.path.exists('results/'):
         os.makedirs(args.model_save_dir)
-    if not os.path.exists('results/' + args.model_name + '/'):
-        os.makedirs('results/' + args.model_name + '/')
+    if not os.path.exists('results/' + args.model_path + '/'):
+        os.makedirs('results/' + args.model_path +'/')
     if not os.path.exists(args.model_save_dir):
         os.makedirs(args.model_save_dir)
     if not os.path.exists(args.result_dir):
         os.makedirs(args.result_dir)
 
     model = build_net(args.model_name)
-    # print(model)
     if torch.cuda.is_available():
         model.cuda()
+    # print(model)
     if args.mode == 'train':
         _train(model, args)
 
@@ -36,7 +37,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Directories
-    parser.add_argument('--model_name', default='MIMO-UNet', choices=['MIMO-UNet', 'MIMO-UNetPlus'], type=str)
+    parser.add_argument('--model_name', default='MIMO-UNet', choices=['MIMO-UNet', 'MIMO-UNetPlus','dwt'], type=str)
     parser.add_argument('--data_dir', type=str, default='dataset/GOPRO')
     parser.add_argument('--mode', default='test', choices=['train', 'test'], type=str)
 
@@ -56,9 +57,18 @@ if __name__ == '__main__':
     # Test
     parser.add_argument('--test_model', type=str, default='weights/MIMO-UNet.pkl')
     parser.add_argument('--save_image', type=bool, default=False, choices=[True, False])
+    # dataloader
+    parser.add_argument('--subset', type=str, default='Hday2night')
+    parser.add_argument('--archive', type=str, default='datasets/ihm4/IHD_train_256.h5')
+    parser.add_argument('--use_subarch', type=bool, default=True, choices=[True, False])
+    parser.add_argument('--model_path', type=str, default='001')
+
 
     args = parser.parse_args()
-    args.model_save_dir = os.path.join('results/', args.model_name, 'weights/')
-    args.result_dir = os.path.join('results/', args.model_name, 'result_image/')
+    args.model_path = args.model_name + time.strftime('_%y%m%d%H%M%S', time.localtime())
+    print(args.model_path)
+
+    args.model_save_dir = os.path.join('results/', args.model_path, 'weights/')
+    args.result_dir = os.path.join('results/', args.model_path, 'result_image/')
     print(args)
     main(args)

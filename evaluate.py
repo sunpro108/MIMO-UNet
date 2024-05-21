@@ -1,18 +1,26 @@
 import os
-import torch
-from torchvision.transforms import functional as F
-import numpy as np
-from utils import Adder
-from data import test_dataloader
-from skimage.metrics import peak_signal_noise_ratio
 import time
 
+import numpy as np
+from skimage.metrics import peak_signal_noise_ratio
+import torch
+from torchvision.transforms import functional as F
+
+from utils import Adder
+from data import valid_dataloader
 
 def _eval(model, args):
     state_dict = torch.load(args.test_model)
     model.load_state_dict(state_dict['model'])
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    dataloader = test_dataloader(args.data_dir, batch_size=1, num_workers=0)
+    # dataloader = valid_dataloader(args.data_dir, batch_size=1, num_workers=0)
+    dataloader = valid_dataloader(
+        subset=args.subset,
+        archive=args.archive,
+        use_subarch=args.use_subarch,
+        batch_size=args.batch_size,
+        num_workers=args.num_worker
+    )
     torch.cuda.empty_cache()
     adder = Adder()
     model.eval()

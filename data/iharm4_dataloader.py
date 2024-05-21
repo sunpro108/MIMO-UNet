@@ -79,8 +79,3 @@ def valid_dataloader(
 #         pin_memory=True
 #     )
 #     return dataloader
-
-if __name__ == "__main__":
-    loader_train = train_dataloader(subset='Hday2night')
-    data = next(iter(loader_train))
-    print(data.keys())

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as tf
-from pytorch_wavelets import DWTForward, DWTInverse
 from einops import rearrange
 
 from .layers import *
@@ -13,8 +12,6 @@ class HMimoUnet(nn.Module):
 
         base_channel = 32
 
-        self.dwt = DWTForward(J=3, wave='haar', mode='zero')
-        self.iwt = DWTInverse(wave='haar', mode='zero')
 
         self.Encoder = nn.ModuleList([
             EBlock(base_channel, num_res),
@@ -59,14 +56,15 @@ class HMimoUnet(nn.Module):
 
     def forward(self, x):
         # x: n c h w
-        N, C, H, W = x.shape
-        _, (x_1, x_2, x_3) = self.dwt(x)
+        # N, C, H, W = x.shape
+        # _, (x_1, x_2, x_3) = self.dwt(x)
+        x_1, x_2, x_3 = x
         # x_1: n c 3 h/2 w/2
         # x_2: n c 3 h/4 w/4
         # x_3: n c 3 h/8 w/8
-        assert (N, C, 3, H//2, W//2) == x_1.shape
-        assert (N, C, 3, H//4, W//4) == x_2.shape 
-        assert (N, C, 3, H//8, W//8) == x_3.shape
+        # assert (N, C, 3, H//2, W//2) == x_1.shape
+        # assert (N, C, 3, H//4, W//4) == x_2.shape 
+        # assert (N, C, 3, H//8, W//8) == x_3.shape
 
         # x_2 = F.interpolate(x, scale_factor=0.5)
         # x_3 = F.interpolate(x_2, scale_factor=0.5)
@@ -90,20 +88,19 @@ class HMimoUnet(nn.Module):
         z = self.FAM1(z, z4)
         z = self.Encoder[2](z)
 
-        z12 = F.interpolate(res1, scale_factor=0.5)
-        z21 = F.interpolate(res2, scale_factor=2)
-        z42 = F.interpolate(z, scale_factor=2)
-        z41 = F.interpolate(z42, scale_factor=2)
+        # z12 = F.interpolate(res1, scale_factor=0.5)
+        # z21 = F.interpolate(res2, scale_factor=2)
+        # z42 = F.interpolate(z, scale_factor=2)
+        # z41 = F.interpolate(z42, scale_factor=2)
 
-        res2 = self.AFFs[1](z12, res2, z42)
-        res1 = self.AFFs[0](res1, z21, z41)
+        # res2 = self.AFFs[1](z12, res2, z42)
+        # res1 = self.AFFs[0](res1, z21, z41)
 
         z = self.Decoder[0](z)
         z_ = self.ConvsOut[0](z)
         z = self.feat_extract[3](z)
         o3 = z_ + x_3
         o3 = rearrange(o3, 'b (c m) h w -> b c m h w', m=3)
-        outputs.append(o3)
 
         z = torch.cat([z, res2], dim=1)
         z = self.Convs[0](z)
@@ -112,7 +109,6 @@ class HMimoUnet(nn.Module):
         z = self.feat_extract[4](z)
         o2 = z_ + x_2
         o2 = rearrange(o2, 'b (c m) h w -> b c m h w', m=3)
-        outputs.append(o2)
 
         z = torch.cat([z, res1], dim=1)
         z = self.Convs[1](z)
@@ -121,5 +117,7 @@ class HMimoUnet(nn.Module):
         o1 = z + x_1
         o1 = rearrange(o1, 'b (c m) h w -> b c m h w', m=3)
         outputs.append(o1)
+        outputs.append(o2)
+        outputs.append(o3)
 
         return outputs
